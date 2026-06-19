@@ -1,0 +1,9 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# WoW generated files
+*.bak
+
+# Release archives
+*.zip

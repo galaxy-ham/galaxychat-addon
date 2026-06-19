@@ -1,0 +1,13 @@
+## Interface: 120007
+## Title: GalaxyChat
+## Notes: Chat enhancements: class colors, keyword alerts, and clickable URLs.
+## Author: You
+## Version: 1.0.0
+## SavedVariables: GalaxyChatDB
+
+Config.lua
+Core.lua
+Modules\ClassColors.lua
+Modules\NameAlert.lua
+Modules\URLHandler.lua
+UI\SettingsPanel.lua
