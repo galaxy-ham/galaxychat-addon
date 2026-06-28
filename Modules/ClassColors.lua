@@ -123,8 +123,16 @@ local function PreHookAddMessage(frame)
     frame.AddMessage = function(self, text, r, g, b, id)
         if GalaxyChat.GetSetting("classColors", "enabled")
         and GalaxyChat.GetSetting("classColors", "colorAuthorName")
-        and text and text:find("|Hplayer:", 1, true) then
-            text = RecolorPlayerLinks(text)
+        and text then
+            -- Strings from secure/combat contexts are marked "secret" and cannot
+            -- be indexed by addon code. Use pcall to bail out silently on taint.
+            local ok, hasLink = pcall(string.find, text, "|Hplayer:", 1, true)
+            if ok and hasLink then
+                local ok2, recolored = pcall(RecolorPlayerLinks, text)
+                if ok2 and recolored then
+                    text = recolored
+                end
+            end
         end
         return orig(self, text, r, g, b, id)
     end
@@ -180,10 +188,14 @@ local function MidMessageFilter(chatFrame, event, message, author, language, cha
 
     if not GalaxyChat.GetSetting("classColors", "enabled") then return false end
     if not GalaxyChat.GetSetting("classColors", "colorMidMessage") then return false end
-    if not message or message == "" then return false end
+    if not message then return false end
 
-    local colored = ColorNamesInMessage(message)
-    if colored == message then return false end
+    -- Secret strings from secure combat contexts cannot be indexed; bail silently.
+    local ok, isEmpty = pcall(string.find, message, "^$")
+    if not ok or isEmpty then return false end
+
+    local ok2, colored = pcall(ColorNamesInMessage, message)
+    if not ok2 or not colored or colored == message then return false end
 
     return false, colored, author, language, channelString,
            target, flags, unknown, channelNumber, channelName,

@@ -56,9 +56,14 @@ end
 function NameAlert.CheckMessage(message, event)
     if not message or #keywords == 0 then return end
 
-    local lower = message:lower()
+    -- During combat some strings are marked "secret" by WoW's secure execution
+    -- context and cannot be indexed by addon code. Bail out silently on taint.
+    local ok, lower = pcall(string.lower, message)
+    if not ok then return end
+
     for _, kw in ipairs(keywords) do
-        if lower:find(kw, 1, true) then
+        local ok2, found = pcall(string.find, lower, kw, 1, true)
+        if ok2 and found then
             NameAlert.PlayAlert()
             return   -- one sound per message, no double-fire
         end
