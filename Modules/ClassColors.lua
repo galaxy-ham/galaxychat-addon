@@ -62,6 +62,10 @@ local function RecolorPlayerLinks(line)
     if not line or not line:find("|Hplayer:", 1, true) then return line end
 
     return (line:gsub("(|Hplayer:([^|]+)|h%[([^%]]+)%]|h)", function(full, linkdata, display)
+        -- Skip links whose display text already contains color codes —
+        -- they have been processed in a previous pass (e.g. guild login notices).
+        if display:find("|c", 1, true) then return full end
+
         -- linkdata = "Name-Realm:instanceID:SUBGROUP:..." — Name-Realm is before first ":"
         local nameRealm = linkdata:match("^([^:]+)")
         if not nameRealm then return full end
