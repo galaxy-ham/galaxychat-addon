@@ -1,0 +1,7 @@
+package-as: GalaxyChat
+curse-id: 1591417
+
+ignore:
+  - .github
+  - .gitignore
+  - Libs
