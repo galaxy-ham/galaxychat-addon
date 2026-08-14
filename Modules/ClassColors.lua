@@ -150,8 +150,44 @@ local function HookAllChatFrames()
 end
 
 -- ---------------------------------------------------------------------------
+-- Find |H...|h...|h hyperlink spans in a message so mid-message coloring
+-- never rewrites text living inside a link's data/display fields.
+--
+-- WHY (bug fix): link data must never contain "|" characters. If a cached
+-- name is a substring of a link's own linkdata/display — which it always is
+-- for e.g. a guild "<Name> has come online." CHAT_MSG_SYSTEM line, since
+-- that message IS a |Hplayer:Name|h[Name]|h link — the old code did a naive
+-- whole-message gsub and injected a "|cffXXXXXX...|r" color code INSIDE the
+-- link's data field. That breaks WoW's pipe/escape parsing, so the client
+-- falls back to printing the raw "|Hplayer:...|h" text instead of rendering
+-- the link (this is exactly the bug reported: raw link syntax showing up in
+-- guild online notices). Scanning for existing link spans up front and
+-- excluding them from the mid-message color pass fixes this without
+-- affecting normal plain-text name coloring.
+-- ---------------------------------------------------------------------------
+local function FindProtectedRanges(message)
+    local ranges = {}
+    local searchStart = 1
+    while true do
+        local s, e = message:find("|H[^|]*|h.-|h", searchStart)
+        if not s then break end
+        table.insert(ranges, { s, e })
+        searchStart = e + 1
+    end
+    return ranges
+end
+
+local function InProtectedRange(pos, ranges)
+    for _, r in ipairs(ranges) do
+        if pos >= r[1] and pos <= r[2] then return true end
+    end
+    return false
+end
+
+-- ---------------------------------------------------------------------------
 -- Mid-message filter — colors cached player names found in the message body.
--- Never modifies the author arg.
+-- Never modifies the author arg. Skips any name occurrence that falls
+-- inside an existing hyperlink span (see FindProtectedRanges above).
 -- ---------------------------------------------------------------------------
 local function ColorNamesInMessage(message)
     local db = GalaxyChatDB
@@ -164,9 +200,18 @@ local function ColorNamesInMessage(message)
         if #name >= minLen and entry.classToken then
             local colored = ClassColors.ColorName(name, entry.classToken)
             local escaped = name:gsub("([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1")
+
+            -- Recompute protected ranges each pass: earlier substitutions in
+            -- this loop can shift string positions, and this is cheap at the
+            -- scale of a single chat line.
+            local protectedRanges = FindProtectedRanges(message)
+
             message = message:gsub(
                 "()(" .. escaped .. ")()",
                 function(pre_pos, match, post_pos)
+                    if InProtectedRange(pre_pos, protectedRanges) then
+                        return match  -- inside a |H...|h link; leave intact
+                    end
                     local pre_char  = message:sub(pre_pos - 1, pre_pos - 1)
                     local post_char = message:sub(post_pos, post_pos)
                     if (pre_char  == "" or not pre_char:match("%a"))
