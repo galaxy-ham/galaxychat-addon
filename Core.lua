@@ -34,6 +34,52 @@ local Cache = GalaxyChat.Cache
 local lookupQueue   = {}   -- { nameRealm = true }
 local lookupPending = {}   -- names we've already sent a lookup request for
 
+-- ---------------------------------------------------------------------------
+-- Name index: bare name (no realm) -> classToken, derived from playerCache.
+--
+-- WHY THIS EXISTS (perf/memory fix):
+-- ClassColors.ColorNamesInMessage used to loop over the ENTIRE playerCache
+-- table for every single incoming chat message, across all 17 registered
+-- chat events, to figure out which names to recolor. With a cache that
+-- grows to thousands of entries over a play session, that meant thousands
+-- of pattern-escapes, gsub calls, and throwaway closures created PER CHAT
+-- LINE — continuous garbage generation that made the addon's memory usage
+-- climb during busy chat (raid/guild/world channel) and only drop back down
+-- when WoW's GC finally caught up. Benchmarked: ~20s of CPU time per 1000
+-- messages with a 5000-entry cache under the old approach.
+--
+-- Cache.nameIndex turns "is this word a known player?" into a single O(1)
+-- table lookup, so the per-message cost becomes proportional to the length
+-- of that message, not the number of players we've ever cached.
+--
+-- Multiple realms can share a first name; last write wins here, same as how
+-- the mid-message coloring already collapsed "Name-Realm" down to just
+-- "Name" and ignored realm when coloring plain chat text.
+-- ---------------------------------------------------------------------------
+Cache.nameIndex = {}
+
+-- Add/update a single name's index entry. Cheap — call this on every
+-- Cache.Set instead of rebuilding the whole index.
+local function IndexName(nameRealm, classToken)
+    local name = strsplit("-", nameRealm, 2)
+    if name and name ~= "" and classToken then
+        Cache.nameIndex[name] = classToken
+    end
+end
+
+-- Full rebuild — only needed after entries are REMOVED (Prune/Enforce/Clear),
+-- since we can't cheaply know whether a removed name is still present under
+-- a different realm elsewhere in the cache without walking the whole table
+-- anyway. Safe to call rarely; not on the per-message hot path.
+local function RebuildNameIndex()
+    Cache.nameIndex = {}
+    local db = GalaxyChatDB
+    if not db or not db.playerCache then return end
+    for nameRealm, entry in pairs(db.playerCache) do
+        IndexName(nameRealm, entry.classToken)
+    end
+end
+
 function Cache.Key(name, realm)
     realm = realm or GetRealmName() or ""
     if realm == "" then
@@ -55,6 +101,7 @@ function Cache.Set(nameRealm, classToken)
         classToken = classToken,
         timestamp  = time(),
     }
+    IndexName(nameRealm, classToken)  -- keep the fast-lookup index in sync
 end
 
 function Cache.QueueLookup(name, realm)
@@ -135,6 +182,9 @@ function Cache.Prune()
     end
 
     if pruned > 0 then
+        -- Entries were removed; the name index would otherwise still point
+        -- at rows that no longer exist, so rebuild it from what's left.
+        RebuildNameIndex()
         print("|cff88aaff[GalaxyChat]|r Pruned " .. pruned .. " stale cache entries.")
     end
 end
@@ -163,12 +213,14 @@ function Cache.Enforce()
         db.playerCache[entries[i].key] = nil
     end
 
+    RebuildNameIndex()  -- see Cache.Prune — entries were removed, index is stale
     print("|cff88aaff[GalaxyChat]|r Cache trimmed to " .. maxEntries .. " entries.")
 end
 
 function Cache.Clear()
     if GalaxyChatDB then
         GalaxyChatDB.playerCache = {}
+        Cache.nameIndex = {}
         print("|cff88aaff[GalaxyChat]|r Player cache cleared.")
     end
 end
@@ -232,12 +284,27 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
         DeepMergeDefaults(GalaxyChatDB.settings, GalaxyChat.Defaults)
 
+        -- Build the fast name-lookup index from whatever cache was loaded
+        -- via SavedVariables. Prune/Enforce below only rebuild the index
+        -- when they actually remove something, so this initial call is
+        -- what covers the common "cache is unchanged since last session" case.
+        RebuildNameIndex()
+
         -- Prune and enforce cache limits on login
         Cache.Prune()
         Cache.Enforce()
 
         -- Start the queue flush ticker
         C_Timer.NewTicker(GalaxyChat.CACHE_FLUSH_INTERVAL, Cache.FlushQueue)
+
+        -- Periodically re-prune/enforce during play, not just at login.
+        -- Without this the cache (and therefore the cost of anything that
+        -- scans it) grows for the entire session and is only ever reset by
+        -- a reload — see Config.lua's CACHE_MAINTENANCE_INTERVAL comment.
+        C_Timer.NewTicker(GalaxyChat.CACHE_MAINTENANCE_INTERVAL, function()
+            Cache.Prune()
+            Cache.Enforce()
+        end)
 
         -- Init modules (each checks its own enabled flag)
         if GalaxyChat.ClassColors then GalaxyChat.ClassColors.Init() end

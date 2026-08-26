@@ -97,7 +97,15 @@ GalaxyChat.URLPatterns = {
 -- ---------------------------------------------------------------------------
 -- Misc constants
 -- ---------------------------------------------------------------------------
-GalaxyChat.CACHE_FLUSH_INTERVAL = 2      -- seconds between queue flush ticks
-GalaxyChat.CACHE_FLUSH_BATCH    = 5      -- max lookups attempted per tick
-GalaxyChat.ALERT_DEBOUNCE_MS    = 500    -- ms between sound triggers
-GalaxyChat.MIN_NAME_LENGTH      = 2      -- skip mid-msg scan for very short names
+GalaxyChat.CACHE_FLUSH_INTERVAL       = 2      -- seconds between queue flush ticks
+GalaxyChat.CACHE_FLUSH_BATCH          = 5      -- max lookups attempted per tick
+GalaxyChat.CACHE_MAINTENANCE_INTERVAL = 300    -- seconds between Prune/Enforce sweeps.
+                                                -- Previously these only ran once, at
+                                                -- ADDON_LOADED, so the cache (and the
+                                                -- per-message scan cost derived from it)
+                                                -- grew unbounded for the rest of the
+                                                -- session. Running them periodically
+                                                -- keeps memory from climbing indefinitely
+                                                -- during a long play session.
+GalaxyChat.ALERT_DEBOUNCE_MS          = 500    -- ms between sound triggers
+GalaxyChat.MIN_NAME_LENGTH            = 2      -- skip mid-msg scan for very short names
